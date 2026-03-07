@@ -1,0 +1,7 @@
+fun <spot>test(z: Int, a: Int)</spot> {
+    println(z + a)
+}
+
+fun main() {
+    test(z = 10, a = 1)
+}
