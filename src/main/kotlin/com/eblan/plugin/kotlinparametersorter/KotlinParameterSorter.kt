@@ -10,7 +10,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 
-class SortParametersAlphabeticallyIntention : IntentionAction {
+class KotlinParameterSorter : IntentionAction {
     override fun getFamilyName(): String = "Kotlin parameter tools"
 
     override fun getText(): String = "Sort parameters alphabetically"
@@ -34,21 +34,28 @@ class SortParametersAlphabeticallyIntention : IntentionAction {
         val originalParams = function.valueParameters
         if (originalParams.size <= 1) return
 
-        val sortedParams = originalParams.sortedBy { it.name }
-        val newNameIndexMap = sortedParams.withIndex().associate { it.value.name to it.index }
+        val (regularParams, callbackParams) = originalParams.partition { param ->
+            val typeText = param.typeReference?.text?.trim() ?: ""
+            "->" !in typeText
+        }
+
+        val sortedRegular = regularParams.sortedBy { it.name }
+        val sortedCallbacks = callbackParams.sortedBy { it.name }
+
+        val sortedParams = sortedRegular + sortedCallbacks
+
+        val newNameIndexMap = sortedParams.withIndex()
+            .associate { it.value.name to it.index }
 
         WriteCommandAction.runWriteCommandAction(project, text, null, {
-            // Update call sites (reuse your method)
             updateCallSites(function, originalParams, newNameIndexMap)
 
-            // Update function definition
             val factory = KtPsiFactory(project)
             val cleanParams = sortedParams.joinToString(", ") { it.text.trim().trimEnd(',') }
             val newParamList = factory.createParameterList("($cleanParams)")
 
             function.valueParameterList?.replace(newParamList)
 
-            // Force refresh for K2 compatibility
             val ktFile = function.containingKtFile
             val documentManager = com.intellij.psi.PsiDocumentManager.getInstance(project)
             val document = documentManager.getDocument(ktFile) ?: return@runWriteCommandAction
@@ -59,7 +66,6 @@ class SortParametersAlphabeticallyIntention : IntentionAction {
         }, function.containingFile)
     }
 
-    // Reuse your existing updateCallSites method (copy it here or extract to companion/utility)
     private fun updateCallSites(
         function: KtFunction,
         originalParams: List<KtParameter>,
