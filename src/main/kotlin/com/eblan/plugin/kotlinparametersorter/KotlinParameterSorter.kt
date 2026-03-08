@@ -21,6 +21,7 @@ class KotlinParameterSorter : IntentionAction {
         if (editor == null || file !is KtFile) return false
 
         val element = file.findElementAt(editor.caretModel.offset) ?: return false
+
         val function = element.getParentOfType<KtFunction>(true) ?: return false
 
         return function.valueParameters.size > 1
@@ -30,24 +31,22 @@ class KotlinParameterSorter : IntentionAction {
         if (editor == null || file !is KtFile) return
 
         val element = file.findElementAt(editor.caretModel.offset) ?: return
+
         val function = element.getParentOfType<KtFunction>(true) ?: return
+
         val originalParams = function.valueParameters
+
         if (originalParams.size <= 1) return
 
-        val (regularParams, callbackParams) = originalParams.partition { param ->
-            val typeText = param.typeReference?.text?.trim() ?: ""
-            "->" !in typeText
-        }
-
-        val sortedRegular = regularParams.sortedBy { it.name }
-        val sortedCallbacks = callbackParams.sortedBy { it.name }
-
-        val sortedParams = sortedRegular + sortedCallbacks
+        val sortedParams = getNewParams(
+            function = function,
+            originalParams = originalParams
+        )
 
         val newNameIndexMap = sortedParams.withIndex()
             .associate { it.value.name to it.index }
 
-        WriteCommandAction.runWriteCommandAction(project, text, null, {
+        WriteCommandAction.runWriteCommandAction(project, "Sort Parameters Alphabetically", null, {
             updateCallSites(function, originalParams, newNameIndexMap)
 
             val factory = KtPsiFactory(project)
@@ -64,6 +63,60 @@ class KotlinParameterSorter : IntentionAction {
             documentManager.doPostponedOperationsAndUnblockDocument(document)
             com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.getInstance(project).restart(ktFile)
         }, function.containingFile)
+    }
+
+    private fun getNewParams(
+        function: KtFunction,
+        originalParams: List<KtParameter>
+    ): List<KtParameter> = if (function.hasComposableAnnotation()) {
+        val modifierParam = originalParams.firstOrNull {
+            it.name == "modifier" &&
+                    it.typeReference?.text?.contains("Modifier", ignoreCase = true) == true
+        }
+
+        val nonCallbacks = originalParams
+            .filter { it !== modifierParam && !isCallback(it) }
+            .sortedBy { it.name }
+
+        val callbacks = originalParams
+            .filter { isCallback(it) }
+            .sortedBy { it.name }
+
+        buildList {
+            if (modifierParam != null) add(modifierParam)
+
+            addAll(nonCallbacks)
+
+            addAll(callbacks)
+        }
+    } else {
+        val (regularParams, callbackParams) = originalParams.partition { param ->
+            val typeText = param.typeReference?.text?.trim() ?: ""
+            "->" !in typeText
+        }
+
+        val sortedRegular = regularParams.sortedBy { it.name }
+
+        val sortedCallbacks = callbackParams.sortedBy { it.name }
+
+        sortedRegular + sortedCallbacks
+    }
+
+    private fun KtFunction.hasComposableAnnotation(): Boolean {
+        return annotationEntries.any { entry ->
+            val text = entry.calleeExpression?.text ?: ""
+            text == "Composable" ||
+                    text.endsWith(".Composable") ||
+                    text == "@Composable"
+        }
+    }
+
+    private fun isCallback(param: KtParameter): Boolean {
+        val typeText = param.typeReference?.text?.trim() ?: return false
+        return "->" in typeText ||
+                typeText.endsWith("->") ||
+                typeText.contains("() ->") ||
+                typeText.contains("suspend () ->")
     }
 
     private fun updateCallSites(
