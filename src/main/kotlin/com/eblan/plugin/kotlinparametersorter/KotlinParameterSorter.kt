@@ -40,11 +40,10 @@ class KotlinParameterSorter : IntentionAction {
 
         val sortedParams = getNewParams(
             function = function,
-            originalParams = originalParams
+            originalParams = originalParams,
         )
 
-        val newNameIndexMap = sortedParams.withIndex()
-            .associate { it.value.name to it.index }
+        val newNameIndexMap = sortedParams.withIndex().associate { it.value.name to it.index }
 
         WriteCommandAction.runWriteCommandAction(project, "Sort Parameters Alphabetically", null, {
             updateCallSites(function, originalParams, newNameIndexMap)
@@ -67,62 +66,40 @@ class KotlinParameterSorter : IntentionAction {
 
     private fun getNewParams(
         function: KtFunction,
-        originalParams: List<KtParameter>
-    ): List<KtParameter> = if (function.hasComposableAnnotation()) {
-        val modifierParam = originalParams.firstOrNull {
-            it.name == "modifier" &&
-                    it.typeReference?.text?.contains("Modifier", ignoreCase = true) == true
+        originalParams: List<KtParameter>,
+    ): List<KtParameter> {
+        val modifierParam = originalParams.firstOrNull { param ->
+            param.name == "modifier" && param.typeReference?.text?.contains("Modifier", ignoreCase = true) == true
+        }.takeIf {
+            function.annotationEntries.any { entry ->
+                val text = entry.calleeExpression?.text ?: ""
+                text == "Composable" || text.endsWith(".Composable") || text == "@Composable"
+            }
         }
 
-        val nonCallbacks = originalParams
-            .filter { it !== modifierParam && !isCallback(it) }
-            .sortedBy { it.name }
+        val nonCallbacks = originalParams.filter { it !== modifierParam && !isCallback(it) }.sortedBy { it.name }
 
-        val callbacks = originalParams
-            .filter { isCallback(it) }
-            .sortedBy { it.name }
+        val callbacks = originalParams.filter { isCallback(it) }.sortedBy { it.name }
 
-        buildList {
-            if (modifierParam != null) add(modifierParam)
+        return buildList {
+            if (modifierParam != null) {
+                add(modifierParam)
+            }
 
             addAll(nonCallbacks)
 
             addAll(callbacks)
         }
-    } else {
-        val (regularParams, callbackParams) = originalParams.partition { param ->
-            val typeText = param.typeReference?.text?.trim() ?: ""
-            "->" !in typeText
-        }
-
-        val sortedRegular = regularParams.sortedBy { it.name }
-
-        val sortedCallbacks = callbackParams.sortedBy { it.name }
-
-        sortedRegular + sortedCallbacks
-    }
-
-    private fun KtFunction.hasComposableAnnotation(): Boolean {
-        return annotationEntries.any { entry ->
-            val text = entry.calleeExpression?.text ?: ""
-            text == "Composable" ||
-                    text.endsWith(".Composable") ||
-                    text == "@Composable"
-        }
     }
 
     private fun isCallback(param: KtParameter): Boolean {
         val typeText = param.typeReference?.text?.trim() ?: return false
-        return "->" in typeText ||
-                typeText.endsWith("->") ||
-                typeText.contains("() ->") ||
-                typeText.contains("suspend () ->")
+
+        return "->" in typeText || typeText.endsWith("->") || typeText.contains("() ->") || typeText.contains("suspend () ->")
     }
 
     private fun updateCallSites(
-        function: KtFunction,
-        originalParams: List<KtParameter>,
-        newNameIndexMap: Map<String?, Int>
+        function: KtFunction, originalParams: List<KtParameter>, newNameIndexMap: Map<String?, Int>
     ) {
         val references = ReferencesSearch.search(function).findAll()
 
