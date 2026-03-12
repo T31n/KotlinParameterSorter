@@ -43,6 +43,10 @@ class KotlinParameterSorter : IntentionAction {
             originalParams = originalParams,
         )
 
+        if (originalParams.map { it.text.trim() } == sortedParams.map { it.text.trim() }) {
+            return
+        }
+
         val newNameIndexMap = sortedParams.withIndex().associate { it.value.name to it.index }
 
         WriteCommandAction.runWriteCommandAction(project, "Sort Parameters Alphabetically", null, {
