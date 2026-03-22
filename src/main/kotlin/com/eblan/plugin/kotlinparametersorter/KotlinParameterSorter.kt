@@ -72,32 +72,63 @@ class KotlinParameterSorter : IntentionAction {
         function: KtFunction,
         originalParams: List<KtParameter>,
     ): List<KtParameter> {
-        val modifierParam = originalParams.firstOrNull { param ->
-            param.name == "modifier" && param.typeReference?.text?.contains("Modifier", ignoreCase = true) == true
-        }.takeIf {
-            function.annotationEntries.any { entry ->
-                val text = entry.calleeExpression?.text ?: ""
-                text == "Composable" || text.endsWith(".Composable") || text == "@Composable"
-            }
+
+        val settings = KotlinParameterSorterSettingsService.getInstance().state
+
+        if (!function.isComposable()) {
+            return originalParams.sortedBy { it.name }
         }
 
-        val nonCallbacks = originalParams.filter { it !== modifierParam && !isCallback(it) }.sortedBy { it.name }
+        val modifierParam = originalParams.firstOrNull { param ->
+            param.name == "modifier" &&
+                    param.typeReference?.text?.contains("Modifier", ignoreCase = true) == true
+        } ?: return buildList {
+            val nonCallbacks = originalParams.filter { !it.isCallback() }.sortedBy { it.name }
+            val callbacks = originalParams.filter { it.isCallback() }.sortedBy { it.name }
+            addAll(nonCallbacks)
+            addAll(callbacks)
+        }
 
-        val callbacks = originalParams.filter { isCallback(it) }.sortedBy { it.name }
+        val nonCallbacks = originalParams.filter {
+            it.defaultValue == null && it !== modifierParam &&
+                    !it.isCallback()
+        }
+
+        val optionalNonCallbacks = originalParams.filter {
+            it.defaultValue != null &&
+                    it !== modifierParam &&
+                    !it.isCallback()
+        }.sortedBy { it.name }
+
+        val callbacks = originalParams.filter {
+            it !== modifierParam && it.isCallback()
+        }.sortedBy { it.name }
 
         return buildList {
-            if (modifierParam != null) {
-                add(modifierParam)
+            when (settings.modifierPositionMode) {
+                ModifierPositionMode.FIRST_PARAMETER -> {
+                    add(modifierParam)
+                    addAll((nonCallbacks + optionalNonCallbacks).sortedBy { it.name })
+                    addAll(callbacks)
+                }
+
+                ModifierPositionMode.FIRST_OPTIONAL -> {
+                    addAll(nonCallbacks)
+                    add(modifierParam)
+                    addAll(optionalNonCallbacks)
+                    addAll(callbacks)
+                }
             }
-
-            addAll(nonCallbacks)
-
-            addAll(callbacks)
         }
     }
 
-    private fun isCallback(param: KtParameter): Boolean {
-        val typeText = param.typeReference?.text?.trim() ?: return false
+    private fun KtFunction.isComposable(): Boolean = annotationEntries.any { entry ->
+        val text = entry.calleeExpression?.text ?: ""
+        text == "Composable" || text.endsWith(".Composable") || text == "@Composable"
+    }
+
+    private fun KtParameter.isCallback(): Boolean {
+        val typeText = typeReference?.text?.trim() ?: return false
 
         return "->" in typeText || typeText.endsWith("->") || typeText.contains("() ->") || typeText.contains("suspend () ->")
     }
