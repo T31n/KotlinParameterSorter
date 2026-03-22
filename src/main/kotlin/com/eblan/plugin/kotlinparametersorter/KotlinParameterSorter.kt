@@ -4,48 +4,38 @@ import com.intellij.codeInsight.intention.IntentionAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.search.searches.ReferencesSearch
-import com.intellij.psi.util.PsiTreeUtil
+import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 
 class KotlinParameterSorter : IntentionAction {
     override fun getFamilyName(): String = "Kotlin parameter tools"
-
     override fun getText(): String = "Sort parameters alphabetically"
-
     override fun startInWriteAction(): Boolean = false
 
     override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean {
         if (editor == null || file !is KtFile) return false
-
         val element = file.findElementAt(editor.caretModel.offset) ?: return false
 
-        val function = element.getParentOfType<KtFunction>(true) ?: return false
+        val function = findTargetFunction(element) ?: return false
 
-        return function.valueParameters.size > 1
+        return function.isWritable && function.valueParameters.size > 1
     }
 
     override fun invoke(project: Project, editor: Editor?, file: PsiFile?) {
         if (editor == null || file !is KtFile) return
-
         val element = file.findElementAt(editor.caretModel.offset) ?: return
 
-        val function = element.getParentOfType<KtFunction>(true) ?: return
-
+        val function = findTargetFunction(element) ?: return
         val originalParams = function.valueParameters
-
         if (originalParams.size <= 1) return
 
-        val sortedParams = getNewParams(
-            function = function,
-            originalParams = originalParams,
-        )
+        val sortedParams = getNewParams(function, originalParams)
 
-        if (originalParams.map { it.text.trim() } == sortedParams.map { it.text.trim() }) {
-            return
-        }
+        if (originalParams.map { it.name } == sortedParams.map { it.name }) return
 
         val newNameIndexMap = sortedParams.withIndex().associate { it.value.name to it.index }
 
@@ -53,99 +43,52 @@ class KotlinParameterSorter : IntentionAction {
             updateCallSites(function, originalParams, newNameIndexMap)
 
             val factory = KtPsiFactory(project)
-            val cleanParams = sortedParams.joinToString(", ") { it.text.trim().trimEnd(',') }
-            val newParamList = factory.createParameterList("($cleanParams)")
 
+            val cleanParamsString = sortedParams.joinToString(",\n    ") { param ->
+                val annotations = param.annotationEntries.joinToString(" ") { it.text }
+                val name = param.name
+                val type = param.typeReference?.text ?: ""
+                val defaultValue = param.defaultValue?.let { " = ${it.text}" } ?: ""
+                val valVar = param.valOrVarKeyword?.text?.let { "$it " } ?: ""
+
+                "$annotations ${valVar}${name}: ${type}${defaultValue}".trim()
+            }
+
+            val newParamList = factory.createParameterList("(\n    $cleanParamsString\n)")
             function.valueParameterList?.replace(newParamList)
 
-            val ktFile = function.containingKtFile
             val documentManager = com.intellij.psi.PsiDocumentManager.getInstance(project)
-            val document = documentManager.getDocument(ktFile) ?: return@runWriteCommandAction
 
-            documentManager.commitDocument(document)
-            documentManager.doPostponedOperationsAndUnblockDocument(document)
-            com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.getInstance(project).restart(ktFile)
+            documentManager.getDocument(function.containingKtFile)?.let { doc ->
+                documentManager.commitDocument(doc)
+            }
         }, function.containingFile)
     }
 
-    private fun getNewParams(
-        function: KtFunction,
-        originalParams: List<KtParameter>,
-    ): List<KtParameter> {
-
-        val settings = KotlinParameterSorterSettingsService.getInstance().state
-
-        if (!function.isComposable()) {
-            return originalParams.sortedBy { it.name }
+    private fun findTargetFunction(element: PsiElement): KtFunction? {
+        val callExpr = element.getParentOfType<KtCallExpression>(true)
+        if (callExpr != null) {
+            val resolved = callExpr.calleeExpression?.mainReference?.resolve()
+            if (resolved is KtFunction) return resolved
         }
 
-        val modifierParam = originalParams.firstOrNull { param ->
-            param.name == "modifier" &&
-                    param.typeReference?.text?.contains("Modifier", ignoreCase = true) == true
-        } ?: return buildList {
-            val nonCallbacks = originalParams.filter { !it.isCallback() }.sortedBy { it.name }
-            val callbacks = originalParams.filter { it.isCallback() }.sortedBy { it.name }
-            addAll(nonCallbacks)
-            addAll(callbacks)
-        }
-
-        val nonCallbacks = originalParams.filter {
-            it.defaultValue == null && it !== modifierParam &&
-                    !it.isCallback()
-        }
-
-        val optionalNonCallbacks = originalParams.filter {
-            it.defaultValue != null &&
-                    it !== modifierParam &&
-                    !it.isCallback()
-        }.sortedBy { it.name }
-
-        val callbacks = originalParams.filter {
-            it !== modifierParam && it.isCallback()
-        }.sortedBy { it.name }
-
-        return buildList {
-            when (settings.modifierPositionMode) {
-                ModifierPositionMode.FIRST_PARAMETER -> {
-                    add(modifierParam)
-                    addAll((nonCallbacks + optionalNonCallbacks).sortedBy { it.name })
-                    addAll(callbacks)
-                }
-
-                ModifierPositionMode.FIRST_OPTIONAL -> {
-                    addAll(nonCallbacks)
-                    add(modifierParam)
-                    addAll(optionalNonCallbacks)
-                    addAll(callbacks)
-                }
-            }
-        }
-    }
-
-    private fun KtFunction.isComposable(): Boolean = annotationEntries.any { entry ->
-        val text = entry.calleeExpression?.text ?: ""
-        text == "Composable" || text.endsWith(".Composable") || text == "@Composable"
-    }
-
-    private fun KtParameter.isCallback(): Boolean {
-        val typeText = typeReference?.text?.trim() ?: return false
-
-        return "->" in typeText || typeText.endsWith("->") || typeText.contains("() ->") || typeText.contains("suspend () ->")
+        return element.getParentOfType<KtFunction>(true)
     }
 
     private fun updateCallSites(
-        function: KtFunction, originalParams: List<KtParameter>, newNameIndexMap: Map<String?, Int>
+        function: KtFunction,
+        originalParams: List<KtParameter>,
+        newNameIndexMap: Map<String?, Int>
     ) {
         val references = ReferencesSearch.search(function).findAll()
+        val factory = KtPsiFactory(function.project)
 
         for (ref in references) {
-            val callExpression = PsiTreeUtil.getParentOfType(ref.element, KtCallExpression::class.java) ?: continue
+            val callExpression = ref.element.getParentOfType<KtCallExpression>(true) ?: continue
             val argumentList = callExpression.valueArgumentList ?: continue
             val arguments = argumentList.arguments
-            val project = function.project
-            val factory = KtPsiFactory(project)
 
-            val reorderedArgs = arrayOfNulls<KtValueArgument>(newNameIndexMap.size)
+            val reorderedArgs = arrayOfNulls<KtValueArgument>(originalParams.size)
 
             arguments.forEachIndexed { index, arg ->
                 val paramName = if (arg.isNamed()) {
@@ -155,15 +98,60 @@ class KotlinParameterSorter : IntentionAction {
                 }
 
                 val newPosition = newNameIndexMap[paramName]
-                if (newPosition != null && newPosition < reorderedArgs.size) {
+                if (newPosition != null) {
                     reorderedArgs[newPosition] = arg
                 }
             }
 
-            val cleanArgs = reorderedArgs.filterNotNull().joinToString(", ") { it.text.trim().trimEnd(',') }
-            val newArgList = factory.createCallArguments("($cleanArgs)")
-
+            val cleanArgsString = reorderedArgs.filterNotNull().joinToString(",\n    ") { it.text.trim() }
+            val newArgList = factory.createCallArguments("(\n    $cleanArgsString\n)")
             argumentList.replace(newArgList)
         }
+    }
+
+    private fun getNewParams(function: KtFunction, originalParams: List<KtParameter>): List<KtParameter> {
+        val settings = KotlinParameterSorterSettingsService.getInstance().state
+
+        if (!function.isComposable()) {
+            return originalParams.sortedBy { it.name }
+        }
+
+        val modifierParam = originalParams.firstOrNull { it.name == "modifier" }
+
+        val nonCallbacks = originalParams.filter {
+            it != modifierParam && !it.isCallback() && it.defaultValue == null
+        }.sortedBy { it.name }
+
+        val optionalNonCallbacks = originalParams.filter {
+            it != modifierParam && !it.isCallback() && it.defaultValue != null
+        }.sortedBy { it.name }
+
+        val callbacks = originalParams.filter {
+            it != modifierParam && it.isCallback()
+        }.sortedBy { it.name }
+
+        return buildList {
+            if (settings.modifierPositionMode == ModifierPositionMode.FIRST_PARAMETER && modifierParam != null) {
+                add(modifierParam)
+            }
+
+            addAll(nonCallbacks)
+
+            if (settings.modifierPositionMode == ModifierPositionMode.FIRST_OPTIONAL && modifierParam != null) {
+                add(modifierParam)
+            }
+
+            addAll(optionalNonCallbacks)
+            addAll(callbacks)
+        }
+    }
+
+    private fun KtFunction.isComposable(): Boolean = annotationEntries.any {
+        it.shortName?.asString() == "Composable"
+    }
+
+    private fun KtParameter.isCallback(): Boolean {
+        val typeText = typeReference?.text ?: return false
+        return typeText.contains("->")
     }
 }
