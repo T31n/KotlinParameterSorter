@@ -14,7 +14,7 @@ import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 class Kps : IntentionAction {
     override fun getFamilyName(): String = "Kotlin parameter tools"
 
-    override fun getText(): String = "Sort parameters alphabetically"
+    override fun getText(): String = "Sort parameters"
 
     override fun startInWriteAction(): Boolean = false
 
@@ -45,7 +45,7 @@ class Kps : IntentionAction {
 
         val newNameIndexMap = sortedParams.withIndex().associate { it.value.name to it.index }
 
-        WriteCommandAction.runWriteCommandAction(project, "Sort Parameters Alphabetically", null, {
+        WriteCommandAction.runWriteCommandAction(project, "Sort Parameters", null, {
             updateCallSites(function, originalParams, newNameIndexMap)
 
             val factory = KtPsiFactory(project)
