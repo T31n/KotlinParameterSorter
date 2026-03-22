@@ -27,18 +27,18 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <intentionAction>
-            <className>com.eblan.plugin.kotlinparametersorter.KotlinParameterSorter</className>
+            <className>com.eblan.plugin.kps.Kps</className>
             <language>kotlin</language>
         </intentionAction>
         <!-- Persistent settings service -->
         <applicationService
-                serviceImplementation="com.eblan.plugin.kotlinparametersorter.KotlinParameterSorterSettingsService"/>
+                serviceImplementation="com.eblan.plugin.kps.KpsPersistentStateComponent"/>
 
         <!-- Settings page -->
         <applicationConfigurable
                 parentId="tools"
-                instance="com.eblan.plugin.kotlinparametersorter.KotlinParameterSorterConfigurable"
-                id="com.eblan.plugin.kotlinparametersorter.KotlinParameterSorterConfigurable"
+                instance="com.eblan.plugin.kps.KpsConfigurable"
+                id="com.eblan.plugin.kps.KpsConfigurable"
                 displayName="Kotlin Parameter Sorter"
                 nonDefaultProject="true"/>
     </extensions>

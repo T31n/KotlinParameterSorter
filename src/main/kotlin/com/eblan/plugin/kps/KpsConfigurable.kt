@@ -1,4 +1,4 @@
-package com.eblan.plugin.kotlinparametersorter
+package com.eblan.plugin.kps
 
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.ComboBox
@@ -6,15 +6,15 @@ import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.listCellRenderer.listCellRenderer
 import javax.swing.JComponent
 
-class KotlinParameterSorterConfigurable : Configurable {
-    private var modeCombo: ComboBox<ModifierPositionMode>? = null
+class KpsConfigurable : Configurable {
+    private var comboBox: ComboBox<ModifierPositionMode>? = null
 
     override fun getDisplayName(): String = "Kotlin Parameter Sorter"
 
     override fun createComponent(): JComponent {
         return panel {
             row("Modifier position in @Composable functions:") {
-                modeCombo = comboBox(
+                comboBox = comboBox(
                     items = ModifierPositionMode.entries,
                     renderer = listCellRenderer {
                         text(
@@ -34,21 +34,24 @@ class KotlinParameterSorterConfigurable : Configurable {
     }
 
     override fun isModified(): Boolean {
-        val settings = KotlinParameterSorterSettingsService.getInstance().state
-        return modeCombo?.item != settings.modifierPositionMode
+        val settings = KpsPersistentStateComponent.getInstance().state
+
+        return comboBox?.item != settings.modifierPositionMode
     }
 
     override fun apply() {
-        val settings = KotlinParameterSorterSettingsService.getInstance().state
-        settings.modifierPositionMode = modeCombo?.item ?: ModifierPositionMode.FIRST_OPTIONAL
+        val settings = KpsPersistentStateComponent.getInstance().state
+
+        settings.modifierPositionMode = comboBox?.item ?: ModifierPositionMode.FIRST_OPTIONAL
     }
 
     override fun reset() {
-        val settings = KotlinParameterSorterSettingsService.getInstance().state
-        modeCombo?.item = settings.modifierPositionMode
+        val settings = KpsPersistentStateComponent.getInstance().state
+
+        comboBox?.item = settings.modifierPositionMode
     }
 
     override fun disposeUIResources() {
-        modeCombo = null
+        comboBox = null
     }
 }
