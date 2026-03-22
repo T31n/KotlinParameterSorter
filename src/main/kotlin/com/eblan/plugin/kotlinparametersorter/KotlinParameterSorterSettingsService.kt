@@ -9,12 +9,13 @@ import com.intellij.openapi.components.*
 )
 class KotlinParameterSorterSettingsService : PersistentStateComponent<KotlinParameterSorterSettings> {
 
-    private var state = KotlinParameterSorterSettings()
+    private var myState = KotlinParameterSorterSettings()
 
-    override fun getState(): KotlinParameterSorterSettings = state.clone()
+    // DO NOT CLONE HERE. The IDE needs the actual reference to save changes.
+    override fun getState(): KotlinParameterSorterSettings = myState
 
     override fun loadState(state: KotlinParameterSorterSettings) {
-        this.state = state
+        this.myState = state
     }
 
     companion object {

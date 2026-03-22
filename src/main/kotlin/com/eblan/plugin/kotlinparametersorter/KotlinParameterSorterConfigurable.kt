@@ -7,9 +7,7 @@ import com.intellij.ui.dsl.listCellRenderer.listCellRenderer
 import javax.swing.JComponent
 
 class KotlinParameterSorterConfigurable : Configurable {
-
-    private var modified = false
-    private lateinit var modeCombo: ComboBox<ModifierPositionMode>
+    private var modeCombo: ComboBox<ModifierPositionMode>? = null
 
     override fun getDisplayName(): String = "Kotlin Parameter Sorter"
 
@@ -27,9 +25,7 @@ class KotlinParameterSorterConfigurable : Configurable {
                             }
                         )
                     }
-                ).applyToComponent {
-                    addActionListener { modified = true }
-                }.component
+                ).component
             }
             row {
                 comment("Choose how the sorter handles the 'modifier' parameter in composable functions.")
@@ -37,21 +33,22 @@ class KotlinParameterSorterConfigurable : Configurable {
         }
     }
 
-    override fun isModified(): Boolean = modified
+    override fun isModified(): Boolean {
+        val settings = KotlinParameterSorterSettingsService.getInstance().state
+        return modeCombo?.item != settings.modifierPositionMode
+    }
 
     override fun apply() {
         val settings = KotlinParameterSorterSettingsService.getInstance().state
-        settings.modifierPositionMode = modeCombo.item ?: ModifierPositionMode.FIRST_OPTIONAL
-        modified = false
+        settings.modifierPositionMode = modeCombo?.item ?: ModifierPositionMode.FIRST_OPTIONAL
     }
 
     override fun reset() {
         val settings = KotlinParameterSorterSettingsService.getInstance().state
-        modeCombo.item = settings.modifierPositionMode
-        modified = false
+        modeCombo?.item = settings.modifierPositionMode
     }
 
     override fun disposeUIResources() {
-        // No heavy resources
+        modeCombo = null
     }
 }
