@@ -13,14 +13,15 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-    Automatically sort Kotlin function parameters alphabetically with a single click.
+    Reorganize Kotlin function parameters alphabetically or with an AI-compatible chat API.
     <br><br>
     <b>Features:</b>
     <ul>
-        <li>Sorts function parameters alphabetically via Intention Action (Alt+Enter).</li>
+        <li>Sorts parameters alphabetically or groups related parameters with AI via Intention Action (Alt+Enter).</li>
         <li><b>Call-site support:</b> Trigger the sort directly from where the function is used—no need to navigate to the definition.</li>
         <li><b>Project-wide updates:</b> Automatically reorders arguments at all call sites across your entire project.</li>
-        <li><b>Compose Ready:</b> Includes customizable settings for handling <code>Modifier</code> and callback positions in @Composable functions.</li>
+        <li><b>Compose Ready:</b> Preserves configurable <code>Modifier</code> and callback positions in @Composable functions.</li>
+        <li><b>Configurable AI:</b> Supports OpenAI-compatible chat-completions endpoints, models, and API keys.</li>
     </ul>
 ]]></description>
 

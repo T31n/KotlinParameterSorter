@@ -30,7 +30,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            Initial version
+            Added AI parameter grouping through configurable OpenAI-compatible chat APIs.
         """.trimIndent()
     }
 }
