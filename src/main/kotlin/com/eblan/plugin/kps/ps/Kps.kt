@@ -1,5 +1,10 @@
-package com.eblan.plugin.kps
+package com.eblan.plugin.kps.ps
 
+import com.eblan.plugin.kps.AiApiKeyStore
+import com.eblan.plugin.kps.KpsPersistentStateComponent
+import com.eblan.plugin.kps.KpsSettings
+import com.eblan.plugin.kps.ModifierPositionMode
+import com.eblan.plugin.kps.ParameterSortingMode
 import com.intellij.codeInsight.intention.IntentionAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
@@ -8,6 +13,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.SmartPointerManager
@@ -19,12 +25,10 @@ import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 class Kps : IntentionAction {
     override fun getFamilyName(): String = "Kotlin parameter tools"
 
-    override fun getText(): String =
-        if (KpsPersistentStateComponent.getInstance().state.sortingMode == ParameterSortingMode.AI) {
-            "Group parameters with AI"
-        } else {
-            "Sort parameters"
-        }
+    override fun getText(): String = when (KpsPersistentStateComponent.getInstance().state.sortingMode) {
+        ParameterSortingMode.AI -> "Group parameters with AI"
+        ParameterSortingMode.ALPHABETICAL -> "Sort parameters alphabetically"
+    }
 
     override fun startInWriteAction(): Boolean = false
 
@@ -82,7 +86,7 @@ class Kps : IntentionAction {
         val isComposable = function.isComposable()
         val apiKey = try {
             AiApiKeyStore.getApiKey()
-        } catch (exception: Exception) {
+        } catch (_: Exception) {
             Messages.showErrorDialog(
                 project,
                 "Could not read the AI API key from the IDE Password Safe.",
@@ -163,8 +167,8 @@ class Kps : IntentionAction {
                 }
                 val paramsByName = currentParams.associateBy { it.name }
                 val orderedParams = mutableListOf<KtParameter>()
-                for (group in constrainedGroups) {
-                    for (name in group.parameterNames) {
+                constrainedGroups.forEach { (_, parameterNames1) ->
+                    parameterNames1.forEach { name ->
                         val parameter = paramsByName[name]
                         if (parameter == null) {
                             Messages.showErrorDialog(
@@ -211,22 +215,19 @@ class Kps : IntentionAction {
 
             val factory = KtPsiFactory(project)
 
-            val cleanParamsString = if (aiGroups == null) {
-                sortedParams.joinToString(",\n    ") { it.asParameterText() }
-            } else {
-                aiGroups.joinToString(",\n    ") { group ->
-                    val groupParams = group.parameterNames.map { name ->
-                        sortedParams.first { it.name == name }
-                    }
-                    "// ${group.name}\n    ${groupParams.joinToString(",\n    ") { it.asParameterText() }}"
+            val cleanParamsString = aiGroups?.joinToString(",\n    ") { group ->
+                val groupParams = group.parameterNames.map { name ->
+                    sortedParams.first { it.name == name }
                 }
+                "// ${group.name}\n    ${groupParams.joinToString(",\n    ") { it.asParameterText() }}"
             }
+                ?: sortedParams.joinToString(",\n    ") { it.asParameterText() }
 
             val newParamList = factory.createParameterList("(\n    $cleanParamsString\n)")
 
             function.valueParameterList?.replace(newParamList)
 
-            val documentManager = com.intellij.psi.PsiDocumentManager.getInstance(project)
+            val documentManager = PsiDocumentManager.getInstance(project)
 
             documentManager.getDocument(function.containingKtFile)?.let { doc ->
                 documentManager.commitDocument(doc)
@@ -289,7 +290,7 @@ class Kps : IntentionAction {
             group.parameterNames.map { it to index }
         }.toMap()
         val splitGroups = mutableListOf<Pair<Int, MutableList<String>>>()
-        for (name in orderedNames) {
+        orderedNames.forEach { name ->
             val groupIndex = groupIndexesByName.getValue(name)
             if (splitGroups.lastOrNull()?.first == groupIndex) {
                 splitGroups.last().second.add(name)
@@ -344,10 +345,10 @@ class Kps : IntentionAction {
             parameter.name?.let { it to (parameter.nameIdentifier?.text ?: it) }
         }.toMap()
 
-        for (ref in references) {
-            val callExpression = ref.element.getParentOfType<KtCallExpression>(true) ?: continue
+        references.forEach { ref ->
+            val callExpression = ref.element.getParentOfType<KtCallExpression>(true) ?: return@forEach
 
-            val argumentList = callExpression.valueArgumentList ?: continue
+            val argumentList = callExpression.valueArgumentList ?: return@forEach
 
             val arguments = argumentList.arguments
 
@@ -369,25 +370,27 @@ class Kps : IntentionAction {
 
             val positionalArguments = mappedArguments.filterNot { it.second.isNamed() }
             val needsNamedArguments = positionalArguments.isNotEmpty() &&
-                (arguments.any { it.isNamed() } ||
-                    positionalArguments.map { it.first }.sorted() != (0 until positionalArguments.size).toList())
+                    (arguments.any { it.isNamed() } ||
+                            positionalArguments.map { it.first }
+                                .sorted() != positionalArguments.indices.toList())
             val reorderedArgs = arrayOfNulls<Triple<Int, KtValueArgument, String?>>(originalParams.size)
             mappedArguments.forEach { (position, argument, parameterName) ->
                 reorderedArgs[position] = Triple(position, argument, parameterName)
             }
 
-            val cleanArgsString = reorderedArgs.filterNotNull().joinToString(",\n    ") { (_, argument, parameterName) ->
-                if (needsNamedArguments && !argument.isNamed()) {
-                    val sourceName = parameterName?.let(parameterSourceNames::get)
-                    if (sourceName != null) {
-                        "$sourceName = ${argument.text.trim()}"
+            val cleanArgsString =
+                reorderedArgs.filterNotNull().joinToString(",\n    ") { (_, argument, parameterName) ->
+                    if (needsNamedArguments && !argument.isNamed()) {
+                        val sourceName = parameterName?.let(parameterSourceNames::get)
+                        if (sourceName != null) {
+                            "$sourceName = ${argument.text.trim()}"
+                        } else {
+                            argument.text.trim()
+                        }
                     } else {
                         argument.text.trim()
                     }
-                } else {
-                    argument.text.trim()
                 }
-            }
 
             val newArgList = factory.createCallArguments("(\n    $cleanArgsString\n)")
 

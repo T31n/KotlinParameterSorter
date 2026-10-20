@@ -36,7 +36,7 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <intentionAction>
-            <className>com.eblan.plugin.kps.Kps</className>
+            <className>com.eblan.plugin.kps.ps.Kps</className>
             <language>kotlin</language>
         </intentionAction>
         <!-- Persistent settings service -->
@@ -57,6 +57,4 @@
         <supportsKotlinPluginMode supportsK2="true"/>
     </extensions>
 
-    <actions>
-    </actions>
 </idea-plugin>

@@ -1,5 +1,7 @@
-package com.eblan.plugin.kps
+package com.eblan.plugin.kps.ps
 
+import com.eblan.plugin.kps.KpsSettings
+import com.eblan.plugin.kps.ModifierPositionMode
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
