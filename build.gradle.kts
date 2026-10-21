@@ -36,7 +36,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            Added AI parameter grouping through configurable OpenAI-compatible chat APIs.
+            AI parameter grouping is now the only organization mode, with an editable system prompt and comments at call sites.
         """.trimIndent()
     }
 }

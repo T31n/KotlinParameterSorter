@@ -13,15 +13,15 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-    Reorganize Kotlin function parameters alphabetically or with an AI-compatible chat API.
+    Organize Kotlin function parameters with an AI-compatible chat API.
     <br><br>
     <b>Features:</b>
     <ul>
-        <li>Sorts parameters alphabetically or groups related parameters with AI via Intention Action (Alt+Enter).</li>
-        <li><b>Call-site support:</b> Trigger the sort directly from where the function is used—no need to navigate to the definition.</li>
-        <li><b>Project-wide updates:</b> Automatically reorders arguments at all call sites across your entire project.</li>
-        <li><b>Compose Ready:</b> Preserves configurable <code>Modifier</code> and callback positions in @Composable functions.</li>
-        <li><b>Configurable AI:</b> Supports OpenAI-compatible chat-completions endpoints, models, and API keys.</li>
+        <li>Groups related parameters with AI via Intention Action (Alt+Enter).</li>
+        <li><b>Call-site support:</b> Trigger the organizer directly from where the function is used—no need to navigate to the definition.</li>
+        <li><b>Project-wide updates:</b> Reorders arguments and adds matching group comments at all call sites across your entire project.</li>
+        <li><b>Parameter ordering:</b> The default system prompt instructs AI to keep required parameters before optional parameters and callbacks last, including final callbacks used with trailing-lambda syntax.</li>
+        <li><b>Configurable AI:</b> Supports OpenAI-compatible chat-completions endpoints, models, system prompts, and API keys.</li>
     </ul>
 ]]></description>
 
@@ -36,7 +36,7 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <intentionAction>
-            <className>com.eblan.plugin.kps.ps.Kps</className>
+            <className>com.eblan.plugin.kps.Kps</className>
             <language>kotlin</language>
         </intentionAction>
         <!-- Persistent settings service -->

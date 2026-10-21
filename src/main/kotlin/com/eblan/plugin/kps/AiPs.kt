@@ -1,7 +1,5 @@
-package com.eblan.plugin.kps.ps
+package com.eblan.plugin.kps
 
-import com.eblan.plugin.kps.KpsSettings
-import com.eblan.plugin.kps.ModifierPositionMode
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
@@ -35,8 +33,6 @@ internal object AiParameterSorter {
         settings: KpsSettings,
         apiKey: String?,
         functionName: String,
-        isComposable: Boolean,
-        modifierPositionMode: ModifierPositionMode,
         parameters: List<AiParameterDescriptor>
     ): List<AiParameterGroup> {
         val endpoint = parseEndpoint(settings.aiEndpoint)
@@ -48,13 +44,11 @@ internal object AiParameterSorter {
                 "model" to model,
                 "temperature" to 0.2,
                 "messages" to listOf(
-                    mapOf("role" to "system", "content" to SYSTEM_PROMPT),
+                    mapOf("role" to "system", "content" to settings.aiSystemPrompt),
                     mapOf(
                         "role" to "user",
                         "content" to buildPrompt(
                             functionName,
-                            isComposable,
-                            modifierPositionMode,
                             parameters
                         )
                     )
@@ -123,15 +117,11 @@ internal object AiParameterSorter {
 
     private fun buildPrompt(
         functionName: String,
-        isComposable: Boolean,
-        modifierPositionMode: ModifierPositionMode,
         parameters: List<AiParameterDescriptor>
     ): String {
         val context = gson.toJson(
             mapOf(
                 "functionName" to functionName,
-                "isComposable" to isComposable,
-                "modifierPositionMode" to modifierPositionMode.name,
                 "parameters" to parameters
             )
         )
@@ -139,7 +129,6 @@ internal object AiParameterSorter {
         return """
             Arrange the Kotlin function parameters into logical groups. Put parameters with closely related purposes next to each other, and give each group a short descriptive name.
             Do not rename, omit, duplicate, or invent parameters. Preserve each parameter name exactly.
-            Keep an existing final callback parameter last so trailing-lambda calls remain valid. For composable functions, keep the configured modifier position, required non-callback parameters before optional non-callback parameters, and callbacks last.
             Return only JSON with this exact shape: {"groups":[{"name":"Group name","parameters":["parameterName"]}]}.
             Every input parameter must appear exactly once, and groups must be in final signature order.
 
@@ -206,6 +195,4 @@ internal object AiParameterSorter {
         return sanitizedName.ifEmpty { "Related parameters" }
     }
 
-    private const val SYSTEM_PROMPT =
-        "You are a Kotlin API design assistant. Return only the JSON requested by the user. Use only the provided parameter names."
 }

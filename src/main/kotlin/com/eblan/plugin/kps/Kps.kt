@@ -1,10 +1,5 @@
-package com.eblan.plugin.kps.ps
+package com.eblan.plugin.kps
 
-import com.eblan.plugin.kps.AiApiKeyStore
-import com.eblan.plugin.kps.KpsPersistentStateComponent
-import com.eblan.plugin.kps.KpsSettings
-import com.eblan.plugin.kps.ModifierPositionMode
-import com.eblan.plugin.kps.ParameterSortingMode
 import com.intellij.codeInsight.intention.IntentionAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
@@ -25,10 +20,7 @@ import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 class Kps : IntentionAction {
     override fun getFamilyName(): String = "Kotlin parameter tools"
 
-    override fun getText(): String = when (KpsPersistentStateComponent.getInstance().state.sortingMode) {
-        ParameterSortingMode.AI -> "Group parameters with AI"
-        ParameterSortingMode.ALPHABETICAL -> "Sort parameters alphabetically"
-    }
+    override fun getText(): String = "Group parameters with AI"
 
     override fun startInWriteAction(): Boolean = false
 
@@ -54,16 +46,7 @@ class Kps : IntentionAction {
         if (originalParams.size <= 1) return
 
         val settings = KpsPersistentStateComponent.getInstance().state.copy()
-        if (settings.sortingMode == ParameterSortingMode.AI) {
-            invokeAiMode(project, function, settings)
-            return
-        }
-
-        val sortedParams = getNewParams(function, originalParams)
-
-        if (originalParams.map { it.name } == sortedParams.map { it.name }) return
-
-        applyParameterOrder(project, function, originalParams, sortedParams)
+        invokeAiMode(project, function, settings)
     }
 
     private fun invokeAiMode(project: Project, function: KtFunction, settings: KpsSettings) {
@@ -83,7 +66,6 @@ class Kps : IntentionAction {
         val descriptors = originalParams.map { it.toAiDescriptor() }
         val functionPointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(function)
         val functionName = function.name ?: "anonymous"
-        val isComposable = function.isComposable()
         val apiKey = try {
             AiApiKeyStore.getApiKey()
         } catch (_: Exception) {
@@ -106,8 +88,6 @@ class Kps : IntentionAction {
                         settings,
                         apiKey,
                         functionName,
-                        isComposable,
-                        settings.modifierPositionMode,
                         descriptors
                     )
                     indicator.checkCanceled()
@@ -149,7 +129,6 @@ class Kps : IntentionAction {
                 val currentParams = currentFunction.valueParameters
                 if (!currentFunction.isWritable ||
                     (currentFunction.name ?: "anonymous") != functionName ||
-                    currentFunction.isComposable() != isComposable ||
                     currentParams.map { it.toAiDescriptor() } != descriptors
                 ) {
                     Messages.showErrorDialog(
@@ -160,14 +139,9 @@ class Kps : IntentionAction {
                     return
                 }
 
-                val constrainedGroups = if (isComposable) {
-                    applyComposableOrdering(currentParams, aiGroups, settings.modifierPositionMode)
-                } else {
-                    preserveTrailingLambdaOrdering(currentParams, aiGroups)
-                }
                 val paramsByName = currentParams.associateBy { it.name }
                 val orderedParams = mutableListOf<KtParameter>()
-                constrainedGroups.forEach { (_, parameterNames1) ->
+                aiGroups.forEach { (_, parameterNames1) ->
                     parameterNames1.forEach { name ->
                         val parameter = paramsByName[name]
                         if (parameter == null) {
@@ -188,7 +162,7 @@ class Kps : IntentionAction {
                         currentFunction,
                         currentParams,
                         orderedParams,
-                        constrainedGroups
+                        aiGroups
                     )
                 } catch (exception: Exception) {
                     Messages.showErrorDialog(
@@ -205,23 +179,22 @@ class Kps : IntentionAction {
         project: Project,
         function: KtFunction,
         originalParams: List<KtParameter>,
-        sortedParams: List<KtParameter>,
-        aiGroups: List<AiParameterGroup>? = null
+        orderedParams: List<KtParameter>,
+        aiGroups: List<AiParameterGroup>
     ) {
-        val newNameIndexMap = sortedParams.withIndex().associate { it.value.name to it.index }
+        val newNameIndexMap = orderedParams.withIndex().associate { it.value.name to it.index }
 
-        WriteCommandAction.runWriteCommandAction(project, "Sort Parameters", null, {
-            updateCallSites(function, originalParams, newNameIndexMap)
+        WriteCommandAction.runWriteCommandAction(project, "Group Parameters with AI", null, {
+            updateCallSites(function, originalParams, newNameIndexMap, aiGroups)
 
             val factory = KtPsiFactory(project)
 
-            val cleanParamsString = aiGroups?.joinToString(",\n    ") { group ->
+            val cleanParamsString = aiGroups.joinToString(",\n    ") { group ->
                 val groupParams = group.parameterNames.map { name ->
-                    sortedParams.first { it.name == name }
+                    orderedParams.first { it.name == name }
                 }
                 "// ${group.name}\n    ${groupParams.joinToString(",\n    ") { it.asParameterText() }}"
             }
-                ?: sortedParams.joinToString(",\n    ") { it.asParameterText() }
 
             val newParamList = factory.createParameterList("(\n    $cleanParamsString\n)")
 
@@ -233,75 +206,6 @@ class Kps : IntentionAction {
                 documentManager.commitDocument(doc)
             }
         }, function.containingFile)
-    }
-
-    private fun applyComposableOrdering(
-        originalParams: List<KtParameter>,
-        aiGroups: List<AiParameterGroup>,
-        modifierPositionMode: ModifierPositionMode
-    ): List<AiParameterGroup> {
-        val modifierParam = originalParams.firstOrNull { it.name == "modifier" }
-        val trailingLambdaParam = originalParams.lastOrNull()?.takeIf { it.isCallback() }
-        val paramsWithoutModifier = originalParams.filter {
-            it != modifierParam && it != trailingLambdaParam
-        }
-        val requiredNonCallbacks = paramsWithoutModifier.filter {
-            !it.isCallback() && it.defaultValue == null
-        }
-        val optionalNonCallbacks = paramsWithoutModifier.filter {
-            !it.isCallback() && it.defaultValue != null
-        }
-        val callbacks = paramsWithoutModifier.filter { it.isCallback() }
-        val aiOrder = aiGroups.flatMap { it.parameterNames }
-
-        val orderedNames = buildList {
-            if (modifierPositionMode == ModifierPositionMode.FIRST_PARAMETER) {
-                modifierParam?.name?.let(::add)
-            }
-            addAll(aiOrder.filter { name -> requiredNonCallbacks.any { it.name == name } })
-            if (modifierPositionMode == ModifierPositionMode.FIRST_OPTIONAL) {
-                modifierParam?.name?.let(::add)
-            }
-            addAll(aiOrder.filter { name -> optionalNonCallbacks.any { it.name == name } })
-            addAll(aiOrder.filter { name -> callbacks.any { it.name == name } })
-            trailingLambdaParam?.name?.let(::add)
-        }
-
-        return groupsInOrder(aiGroups, orderedNames)
-    }
-
-    private fun preserveTrailingLambdaOrdering(
-        originalParams: List<KtParameter>,
-        aiGroups: List<AiParameterGroup>
-    ): List<AiParameterGroup> {
-        val trailingLambdaParam = originalParams.lastOrNull()?.takeIf { it.isCallback() } ?: return aiGroups
-        val trailingLambdaName = trailingLambdaParam.name ?: return aiGroups
-        val orderedNames = aiGroups.flatMap { it.parameterNames }
-            .filterNot { it == trailingLambdaName } + trailingLambdaName
-
-        return groupsInOrder(aiGroups, orderedNames)
-    }
-
-    private fun groupsInOrder(
-        aiGroups: List<AiParameterGroup>,
-        orderedNames: List<String>
-    ): List<AiParameterGroup> {
-        val groupIndexesByName = aiGroups.flatMapIndexed { index, group ->
-            group.parameterNames.map { it to index }
-        }.toMap()
-        val splitGroups = mutableListOf<Pair<Int, MutableList<String>>>()
-        orderedNames.forEach { name ->
-            val groupIndex = groupIndexesByName.getValue(name)
-            if (splitGroups.lastOrNull()?.first == groupIndex) {
-                splitGroups.last().second.add(name)
-            } else {
-                splitGroups.add(groupIndex to mutableListOf(name))
-            }
-        }
-
-        return splitGroups.map { (groupIndex, names) ->
-            AiParameterGroup(aiGroups[groupIndex].name, names.toList())
-        }
     }
 
     private fun KtParameter.asParameterText(): String {
@@ -336,7 +240,8 @@ class Kps : IntentionAction {
     private fun updateCallSites(
         function: KtFunction,
         originalParams: List<KtParameter>,
-        newNameIndexMap: Map<String?, Int>
+        newNameIndexMap: Map<String?, Int>,
+        aiGroups: List<AiParameterGroup>
     ) {
         val references = ReferencesSearch.search(function).findAll()
 
@@ -344,13 +249,17 @@ class Kps : IntentionAction {
         val parameterSourceNames = originalParams.mapNotNull { parameter ->
             parameter.name?.let { it to (parameter.nameIdentifier?.text ?: it) }
         }.toMap()
+        val groupIndexByParameterName = aiGroups.flatMapIndexed { groupIndex, group ->
+            group.parameterNames.map { it to groupIndex }
+        }.toMap()
 
         references.forEach { ref ->
             val callExpression = ref.element.getParentOfType<KtCallExpression>(true) ?: return@forEach
 
-            val argumentList = callExpression.valueArgumentList ?: return@forEach
-
-            val arguments = argumentList.arguments
+            val argumentList = callExpression.valueArgumentList
+            val trailingLambdaArgument = callExpression.lambdaArguments.lastOrNull()
+            if (argumentList == null && trailingLambdaArgument == null) return@forEach
+            val arguments = argumentList?.arguments.orEmpty()
 
             val mappedArguments = mutableListOf<Triple<Int, KtValueArgument, String?>>()
 
@@ -378,8 +287,19 @@ class Kps : IntentionAction {
                 reorderedArgs[position] = Triple(position, argument, parameterName)
             }
 
-            val cleanArgsString =
-                reorderedArgs.filterNotNull().joinToString(",\n    ") { (_, argument, parameterName) ->
+            val orderedArguments = reorderedArgs.filterNotNull()
+            val argumentTexts = mutableListOf<String>()
+            var previousGroupIndex: Int? = null
+            orderedArguments.forEach { (_, argument, parameterName) ->
+                val groupIndex = parameterName?.let(groupIndexByParameterName::get)
+                val groupComment = if (groupIndex != null && groupIndex != previousGroupIndex) {
+                    "// ${aiGroups[groupIndex].name}\n    "
+                } else {
+                    ""
+                }
+                previousGroupIndex = groupIndex
+
+                val argumentText =
                     if (needsNamedArguments && !argument.isNamed()) {
                         val sourceName = parameterName?.let(parameterSourceNames::get)
                         if (sourceName != null) {
@@ -390,54 +310,46 @@ class Kps : IntentionAction {
                     } else {
                         argument.text.trim()
                     }
+                argumentTexts.add(groupComment + argumentText)
+            }
+
+            val lastArgumentGroupIndex = orderedArguments.lastOrNull()
+                ?.third
+                ?.let(groupIndexByParameterName::get)
+            val trailingLambdaGroupIndex = if (trailingLambdaArgument != null) {
+                originalParams.lastOrNull()?.name?.let(groupIndexByParameterName::get)
+            } else {
+                null
+            }
+            val trailingLambdaComment = if (
+                trailingLambdaGroupIndex != null && trailingLambdaGroupIndex != lastArgumentGroupIndex
+            ) {
+                "// ${aiGroups[trailingLambdaGroupIndex].name}"
+            } else {
+                null
+            }
+
+            if (argumentTexts.isEmpty() && trailingLambdaComment == null) return@forEach
+
+            val cleanArgsString = argumentTexts.joinToString(",\n    ").let { argumentsText ->
+                if (trailingLambdaComment == null) {
+                    argumentsText
+                } else if (argumentsText.isEmpty()) {
+                    trailingLambdaComment
+                } else {
+                    "$argumentsText\n    $trailingLambdaComment"
                 }
+            }
 
             val newArgList = factory.createCallArguments("(\n    $cleanArgsString\n)")
 
-            argumentList.replace(newArgList)
-        }
-    }
-
-    private fun getNewParams(function: KtFunction, originalParams: List<KtParameter>): List<KtParameter> {
-        val settings = KpsPersistentStateComponent.getInstance().state
-
-        if (!function.isComposable()) {
-            return originalParams.sortedBy { it.name }
-        }
-
-        val modifierParam = originalParams.firstOrNull { it.name == "modifier" }
-
-        val nonCallbacks = originalParams.filter {
-            it != modifierParam && !it.isCallback() && it.defaultValue == null
-        }.sortedBy { it.name }
-
-        val optionalNonCallbacks = originalParams.filter {
-            it != modifierParam && !it.isCallback() && it.defaultValue != null
-        }.sortedBy { it.name }
-
-        val callbacks = originalParams.filter {
-            it != modifierParam && it.isCallback()
-        }.sortedBy { it.name }
-
-        return buildList {
-            if (settings.modifierPositionMode == ModifierPositionMode.FIRST_PARAMETER && modifierParam != null) {
-                add(modifierParam)
+            if (argumentList != null) {
+                argumentList.replace(newArgList)
+            } else {
+                val lambdaArgument = trailingLambdaArgument ?: return@forEach
+                callExpression.addBefore(newArgList, lambdaArgument)
             }
-
-            addAll(nonCallbacks)
-
-            if (settings.modifierPositionMode == ModifierPositionMode.FIRST_OPTIONAL && modifierParam != null) {
-                add(modifierParam)
-            }
-
-            addAll(optionalNonCallbacks)
-
-            addAll(callbacks)
         }
-    }
-
-    private fun KtFunction.isComposable(): Boolean = annotationEntries.any {
-        it.shortName?.asString() == "Composable"
     }
 
     private fun KtParameter.isCallback(): Boolean {
