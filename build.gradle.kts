@@ -7,6 +7,8 @@ plugins {
 group = "com.eblan.plugin"
 version = "1.0-SNAPSHOT"
 
+val localIdePath = "${System.getProperty("user.home")}/.local/share/JetBrains/Toolbox/apps/idea-IU-253.31033.145"
+
 repositories {
     mavenCentral()
     intellijPlatform {
@@ -17,13 +19,19 @@ repositories {
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     intellijPlatform {
-        local("${System.getProperty("user.home")}/.local/share/JetBrains/Toolbox/apps/idea-IU-253.31033.145")
+        local(localIdePath)
         bundledPlugin("org.jetbrains.kotlin")
         bundledPlugin("com.intellij.java")
     }
 }
 
 intellijPlatform {
+    pluginVerification {
+        ides {
+            local(localIdePath)
+        }
+    }
+
     pluginConfiguration {
         ideaVersion {
             sinceBuild = "252.25557"
