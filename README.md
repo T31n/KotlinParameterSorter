@@ -1,9 +1,26 @@
-# Kotlin Function Parameter Sorter
+# Kotlin Parameter Sorter
 
-An IntelliJ and Android Studio plugin that uses AI to organize Kotlin function parameters. Use the intention action (`Alt+Enter`) from a function declaration or call site; the plugin updates the function and its call sites together.
+Group Kotlin function parameters with AI. Invoke **Group parameters with AI** from the `Alt+Enter` menu on a function declaration or call. The plugin updates the function signature and project call sites, adding comments that identify each group.
 
-AI groups related parameters and adds the group names as comments in both the function signature and the corresponding call-site arguments. The plugin reorders arguments at all call sites project-wide. In **Settings | Tools | Kotlin Parameter Sorter**, configure the OpenAI-compatible chat-completions endpoint, model, system prompt, and API key. The endpoint and model fields start empty; the editable system prompt has a default. The AI request includes the system prompt, function name, parameter names/types, and default/callback flags; it does not send the function body or call sites. The AI's response is checked to ensure it includes every parameter exactly once.
+## Features
 
-API keys are stored in the IDE Password Safe, not in the plugin settings file. Local endpoints may leave the API key blank.
+- Groups related parameters under descriptive names.
+- Can be invoked from a function declaration or call site.
+- Reorders arguments and adds matching group comments at project call sites.
+- The default prompt keeps required parameters before optional parameters and callbacks last, including trailing-lambda callbacks.
 
-The AI mode uses the OpenAI-compatible chat-completions request format with bearer-token authentication, so it works with providers and local servers that implement that format. Provider-specific APIs that do not implement it need a compatible endpoint or an adapter. The default system prompt asks the AI to keep required parameters before optional parameters and callbacks last, including a final callback used with trailing-lambda syntax.
+## Install and use
+
+1. In your IDE, open **Settings/Preferences | Plugins | Marketplace**, search for **Kotlin Parameter Sorter**, and install it.
+2. Open **Settings/Preferences | Tools | Kotlin Parameter Sorter**. Configure the AI API endpoint and model, edit the default system prompt if needed, and enter an API key if your service requires one.
+3. In a Kotlin file, place the caret on a function declaration or call, press `Alt+Enter`, and select **Group parameters with AI**.
+
+The endpoint must support the plugin's chat-completions request format. The API key is stored in the IDE Password Safe; local endpoints may not require one.
+
+## Data sent to the AI service
+
+The request includes the system prompt, function name, parameter names and types, and whether each parameter has a default value or is a callback. Function bodies and call sites are not sent.
+
+## Support
+
+Report bugs or request features in [GitHub Issues](https://github.com/JackEblan/KotlinParameterSorter/issues).
