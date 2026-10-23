@@ -19,7 +19,7 @@ dependencies {
     testImplementation(kotlin("test"))
 
     intellijPlatform {
-        local(file(".intellijPlatform/sandbox/idea-IU-262.10968.63").absolutePath)
+        intellijIdea("2026.2.3")
         bundledPlugin("org.jetbrains.kotlin")
         bundledPlugin("com.intellij.java")
     }
@@ -28,7 +28,7 @@ dependencies {
 intellijPlatform {
     pluginVerification {
         ides {
-            recommended()
+            current()
         }
     }
 
