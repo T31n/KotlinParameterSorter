@@ -66,18 +66,24 @@ class Kps : IntentionAction {
         val descriptors = originalParams.map { it.toAiDescriptor() }
         val functionPointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(function)
         val functionName = function.name ?: "anonymous"
-        val apiKey = try {
-            AiApiKeyStore.getApiKey()
-        } catch (_: Exception) {
-            Messages.showErrorDialog(
-                project,
-                "Could not read the AI API key from the IDE Password Safe.",
-                "AI Parameter Sorter"
-            )
-            return
+        val memoryMatch = KpsArrangementMemory.getInstance()
+            .findMatch(project, settings, descriptors)
+        val apiKey = if (memoryMatch?.newParameters?.isEmpty() == true) {
+            null
+        } else {
+            try {
+                AiApiKeyStore.getApiKey()
+            } catch (_: Exception) {
+                Messages.showErrorDialog(
+                    project,
+                    "Could not read the AI API key from the IDE Password Safe.",
+                    "AI Parameter Sorter"
+                )
+                return
+            }
         }
 
-        object : Task.Backgroundable(project, "Organizing Kotlin parameters with AI", true) {
+        object : Task.Backgroundable(project, "Organizing Kotlin parameters", true) {
             private var groups: List<AiParameterGroup>? = null
             private var failureMessage: String? = null
 
@@ -88,7 +94,8 @@ class Kps : IntentionAction {
                         settings,
                         apiKey,
                         functionName,
-                        descriptors
+                        descriptors,
+                        memoryMatch?.groups.orEmpty()
                     )
                     indicator.checkCanceled()
                 } catch (exception: ProcessCanceledException) {
@@ -168,6 +175,22 @@ class Kps : IntentionAction {
                     Messages.showErrorDialog(
                         project,
                         exception.message ?: "Could not apply the AI parameter grouping.",
+                        "AI Parameter Sorter"
+                    )
+                    return
+                }
+
+                try {
+                    KpsArrangementMemory.getInstance().remember(
+                        project,
+                        settings,
+                        descriptors,
+                        aiGroups
+                    )
+                } catch (exception: Exception) {
+                    Messages.showErrorDialog(
+                        project,
+                        exception.message ?: "Could not save the remembered parameter arrangement.",
                         "AI Parameter Sorter"
                     )
                 }

@@ -20,6 +20,7 @@
         <li>Groups related parameters with AI via Intention Action (Alt+Enter).</li>
         <li><b>Call-site support:</b> Trigger the organizer directly from where the function is used—no need to navigate to the definition.</li>
         <li><b>Project-wide updates:</b> Reorders arguments and adds matching group comments at all call sites across your entire project.</li>
+        <li><b>Arrangement memory:</b> Reuses saved group names and parameter order across related functions, keeping prop-drilled APIs consistent.</li>
         <li><b>Parameter ordering:</b> The default system prompt instructs AI to keep required parameters before optional parameters and callbacks last, including final callbacks used with trailing-lambda syntax.</li>
         <li><b>Configurable AI:</b> Supports OpenAI-compatible chat-completions endpoints, models, system prompts, and API keys.</li>
     </ul>
@@ -42,6 +43,8 @@
         <!-- Persistent settings service -->
         <applicationService
                 serviceImplementation="com.eblan.plugin.kps.KpsPersistentStateComponent"/>
+        <applicationService
+                serviceImplementation="com.eblan.plugin.kps.KpsArrangementMemory"/>
 
         <!-- Settings page -->
         <applicationConfigurable

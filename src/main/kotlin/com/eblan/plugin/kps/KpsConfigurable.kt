@@ -5,6 +5,7 @@ import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.panel
+import javax.swing.JButton
 import javax.swing.JComponent
 
 class KpsConfigurable : Configurable {
@@ -18,6 +19,9 @@ class KpsConfigurable : Configurable {
     override fun createComponent(): JComponent {
         val apiKeyField = JBPasswordField()
         this.apiKeyField = apiKeyField
+        val clearMemoryButton = JButton("Clear all remembered arrangements").apply {
+            addActionListener { KpsArrangementMemory.getInstance().clearAll() }
+        }
 
         return panel {
             row("AI-compatible API endpoint:") {
@@ -34,8 +38,17 @@ class KpsConfigurable : Configurable {
             }
             row {
                 comment(
-                    "The system prompt tells the AI how to group and order parameters. Function name, parameter names/types, and default/callback flags are sent separately; " +
+                    "AI requests include the function name and parameter metadata. Partial reuse also sends the remembered group names and parameter names as context; " +
                         "the function body and call sites are not sent. The API key is stored in the IDE Password Safe."
+                )
+            }
+            row {
+                cell(clearMemoryButton)
+            }
+            row {
+                comment(
+                    "Validated arrangements are stored locally per project and reused for matching parameters. " +
+                        "Clearing removes remembered arrangements for all projects."
                 )
             }
         }

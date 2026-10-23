@@ -16,6 +16,8 @@ repositories {
 
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
+    testImplementation(kotlin("test"))
+
     intellijPlatform {
         local(file(".intellijPlatform/sandbox/idea-IU-262.10968.63").absolutePath)
         bundledPlugin("org.jetbrains.kotlin")

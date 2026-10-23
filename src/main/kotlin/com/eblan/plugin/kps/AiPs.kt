@@ -10,6 +10,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.Locale
 
 internal data class AiParameterDescriptor(
     val name: String,
@@ -20,7 +21,8 @@ internal data class AiParameterDescriptor(
 
 internal data class AiParameterGroup(
     val name: String,
-    val parameterNames: List<String>
+    val parameterNames: List<String>,
+    val afterGroup: String? = null
 )
 
 internal object AiParameterSorter {
@@ -33,8 +35,36 @@ internal object AiParameterSorter {
         settings: KpsSettings,
         apiKey: String?,
         functionName: String,
-        parameters: List<AiParameterDescriptor>
+        parameters: List<AiParameterDescriptor>,
+        rememberedGroups: List<AiParameterGroup> = emptyList()
     ): List<AiParameterGroup> {
+        val rememberedNames = rememberedGroups.flatMap { it.parameterNames }.toSet()
+        val newParameters = parameters.filterNot { it.name in rememberedNames }
+        if (rememberedGroups.isNotEmpty() && newParameters.isEmpty()) {
+            return rememberedGroups
+        }
+
+        val incremental = rememberedGroups.isNotEmpty()
+        val prompt = if (incremental) {
+            buildIncrementalPrompt(functionName, newParameters, rememberedGroups)
+        } else {
+            buildPrompt(functionName, parameters)
+        }
+        val expectedNames = if (incremental) newParameters.map { it.name } else parameters.map { it.name }
+        val groups = parseGroups(
+            requestCompletion(settings, apiKey, prompt),
+            expectedNames,
+            requireAfterGroup = incremental
+        )
+
+        return if (incremental) mergeRememberedGroups(rememberedGroups, groups) else groups
+    }
+
+    private fun requestCompletion(
+        settings: KpsSettings,
+        apiKey: String?,
+        prompt: String
+    ): String {
         val endpoint = parseEndpoint(settings.aiEndpoint)
         val model = settings.aiModel.trim()
         require(model.isNotEmpty()) { "Configure an AI model in Kotlin Parameter Sorter settings." }
@@ -45,13 +75,7 @@ internal object AiParameterSorter {
                 "temperature" to 0.2,
                 "messages" to listOf(
                     mapOf("role" to "system", "content" to settings.aiSystemPrompt),
-                    mapOf(
-                        "role" to "user",
-                        "content" to buildPrompt(
-                            functionName,
-                            parameters
-                        )
-                    )
+                    mapOf("role" to "user", "content" to prompt)
                 )
             )
         )
@@ -95,7 +119,7 @@ internal object AiParameterSorter {
             throw IllegalStateException("The AI endpoint returned an invalid chat-completions response.", exception)
         }
 
-        return parseGroups(content, parameters.map { it.name })
+        return content
     }
 
     private fun parseEndpoint(endpointText: String): URI {
@@ -137,7 +161,46 @@ internal object AiParameterSorter {
         """.trimIndent()
     }
 
-    private fun parseGroups(content: String, expectedNames: List<String>): List<AiParameterGroup> {
+    private fun buildIncrementalPrompt(
+        functionName: String,
+        newParameters: List<AiParameterDescriptor>,
+        rememberedGroups: List<AiParameterGroup>
+    ): String {
+        val rememberedContext = gson.toJson(
+            rememberedGroups.map { group ->
+                mapOf(
+                    "name" to group.name,
+                    "parameters" to group.parameterNames
+                )
+            }
+        )
+        val newParameterContext = gson.toJson(
+            mapOf(
+                "functionName" to functionName,
+                "parameters" to newParameters
+            )
+        )
+
+        return """
+            Place only the new Kotlin function parameters into groups. The saved groups below are fixed: preserve their names, members, and relative order.
+            If a new parameter belongs in an existing group, return that exact group name. Otherwise, create a new group and place it relative to the saved groups using "afterGroup" (use null to place it before the first saved group).
+            Return only JSON with this exact shape: {"groups":[{"name":"Group name","parameters":["newParameterName"],"afterGroup":null}]}.
+            Set "afterGroup" to JSON null or to the exact name of a saved group.
+            Include each new parameter exactly once. Do not include saved parameters in the response. Keep distinct new groups in final order.
+
+            Saved groups:
+            $rememberedContext
+
+            New parameters:
+            $newParameterContext
+        """.trimIndent()
+    }
+
+    private fun parseGroups(
+        content: String,
+        expectedNames: List<String>,
+        requireAfterGroup: Boolean = false
+    ): List<AiParameterGroup> {
         val jsonContent = content.trim()
             .removePrefix("```json")
             .removePrefix("```")
@@ -161,7 +224,21 @@ internal object AiParameterSorter {
                     throw IllegalStateException("empty group")
                 }
 
-                AiParameterGroup(sanitizeGroupName(name), parameterNames)
+                if (requireAfterGroup && !group.has("afterGroup")) {
+                    throw IllegalStateException("missing afterGroup")
+                }
+                val afterGroup = if (group.has("afterGroup")) {
+                    val afterGroupElement = group.get("afterGroup")
+                    if (afterGroupElement.isJsonNull) {
+                        null
+                    } else {
+                        sanitizeGroupName(afterGroupElement.asRequiredString())
+                    }
+                } else {
+                    null
+                }
+
+                AiParameterGroup(sanitizeGroupName(name), parameterNames, afterGroup)
             }
         } catch (exception: Exception) {
             throw IllegalStateException("The AI returned an invalid parameter grouping.", exception)
@@ -177,6 +254,66 @@ internal object AiParameterSorter {
 
         return groups
     }
+
+    internal fun mergeRememberedGroups(
+        rememberedGroups: List<AiParameterGroup>,
+        newGroups: List<AiParameterGroup>
+    ): List<AiParameterGroup> {
+        val rememberedGroupIndices = linkedMapOf<String, Int>()
+        rememberedGroups.forEachIndexed { index, group ->
+            rememberedGroupIndices.putIfAbsent(groupKey(group.name), index)
+        }
+
+        val parametersToAppend = MutableList(rememberedGroups.size) { mutableListOf<String>() }
+        val newGroupsByPosition = MutableList(rememberedGroups.size + 1) {
+            linkedMapOf<String, AiParameterGroup>()
+        }
+        val newGroupPositions = mutableMapOf<String, Int>()
+
+        newGroups.forEach { group ->
+            val normalizedName = groupKey(group.name)
+            val rememberedIndex = rememberedGroupIndices[normalizedName]
+            if (rememberedIndex != null) {
+                parametersToAppend[rememberedIndex].addAll(group.parameterNames)
+                return@forEach
+            }
+
+            val afterIndex = group.afterGroup?.let { afterGroup ->
+                rememberedGroupIndices[groupKey(afterGroup)]
+                    ?: throw IllegalStateException("The AI referenced an unknown remembered parameter group.")
+            }
+            val position = afterIndex?.plus(1) ?: 0
+            val previousPosition = newGroupPositions.putIfAbsent(normalizedName, position)
+            if (previousPosition != null && previousPosition != position) {
+                throw IllegalStateException("The AI placed the same new parameter group in conflicting positions.")
+            }
+
+            val groupsAtPosition = newGroupsByPosition[position]
+            val existingGroup = groupsAtPosition[normalizedName]
+            groupsAtPosition[normalizedName] = if (existingGroup == null) {
+                group.copy(afterGroup = null)
+            } else {
+                existingGroup.copy(parameterNames = existingGroup.parameterNames + group.parameterNames)
+            }
+        }
+
+        return buildList {
+            for (position in 0..rememberedGroups.size) {
+                addAll(newGroupsByPosition[position].values)
+                if (position < rememberedGroups.size) {
+                    val rememberedGroup = rememberedGroups[position]
+                    add(
+                        rememberedGroup.copy(
+                            parameterNames = rememberedGroup.parameterNames + parametersToAppend[position],
+                            afterGroup = null
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun groupKey(name: String): String = name.trim().lowercase(Locale.ROOT)
 
     private fun JsonElement?.asRequiredString(): String {
         if (this == null || !isJsonPrimitive || !asJsonPrimitive.isString) {
